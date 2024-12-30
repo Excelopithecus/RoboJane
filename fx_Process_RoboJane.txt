@@ -1,0 +1,36 @@
+(SourceTable as table) =>
+
+//Your table needs to have one column named "cleantext" in text type.
+//Make sure all punctuation marks in your text -- except hyphens (-) and contraction signs (e.g., "shan't") -- have a blank space before and after them.
+
+let
+    
+    #"Lowercased Text" = Table.TransformColumns(SourceTable,{{"cleantext", Text.Lower, type text}}),
+    #"Added Custom" = Table.AddColumn(#"Lowercased Text", "Custom", each "$"&[cleantext]),
+    #"Removed Columns" = Table.RemoveColumns(#"Added Custom",{"cleantext"}),
+    #"Changed Type1" = Table.TransformColumnTypes(#"Removed Columns",{{"Custom", type text}}),
+    #"Split Column by Delimiter" = Table.ExpandListColumn(Table.TransformColumns(#"Changed Type1", {{"Custom", Splitter.SplitTextByDelimiter(" ", QuoteStyle.None), let itemType = (type nullable text) meta [Serialized.Text = true] in type {itemType}}}), "Custom"),
+    #"Changed Type2" = Table.TransformColumnTypes(#"Split Column by Delimiter",{{"Custom", type text}}),
+    #"Added Index" = Table.AddIndexColumn(#"Changed Type2", "Index", 1, 1, Int64.Type),
+    #"Removed Columns1" = Table.RemoveColumns(#"Added Index",{"Custom"}),
+    #"Added Index1" = Table.AddIndexColumn(#"Removed Columns1", "Index.1", 2, 1, Int64.Type),
+    #"Added Index2" = Table.AddIndexColumn(#"Added Index1", "Index.2", 3, 1, Int64.Type),
+    Join1 = Table.NestedJoin(#"Added Index2","Index",#"Added Index","Index","Join1",JoinKind.LeftOuter),
+    Join2 = Table.NestedJoin(Join1,"Index.1",#"Added Index","Index","Join2",JoinKind.LeftOuter),
+    Join3 = Table.NestedJoin(Join2,"Index.2",#"Added Index","Index","Join3",JoinKind.LeftOuter),
+    #"Expanded Join1" = Table.ExpandTableColumn(Join3, "Join1", {"Custom"}, {"Custom"}),
+    #"Expanded Join2" = Table.ExpandTableColumn(#"Expanded Join1", "Join2", {"Custom"}, {"Custom.1"}),
+    #"Expanded Join3" = Table.ExpandTableColumn(#"Expanded Join2", "Join3", {"Custom"}, {"Custom.2"}),
+    #"Removed Columns2" = Table.RemoveColumns(#"Expanded Join3",{"Index", "Index.1", "Index.2"}),
+    #"Duplicated Column" = Table.DuplicateColumn(#"Removed Columns2", "Custom.1", "Custom.1 - Copy"),
+    #"Merged Columns" = Table.CombineColumns(#"Duplicated Column",{"Custom", "Custom.1"},Combiner.CombineTextByDelimiter("|", QuoteStyle.None),"double"),
+    #"Reordered Columns" = Table.ReorderColumns(#"Merged Columns",{"double", "Custom.1 - Copy", "Custom.2"}),
+    #"Merged Columns1" = Table.CombineColumns(#"Reordered Columns",{"Custom.1 - Copy", "Custom.2"},Combiner.CombineTextByDelimiter("|", QuoteStyle.None),"next_double"),
+    #"Grouped Rows" = Table.Group(#"Merged Columns1", {"double"}, {{"Count", each Table.RowCount(_), Int64.Type}}),
+    Custom1 = Table.Group(#"Merged Columns1", {"double","next_double"}, {{"NextCount", each Table.RowCount(_), Int64.Type}}),
+    Join4 = Table.NestedJoin(Custom1,{"double"},#"Grouped Rows",{"double"},"Double Count",JoinKind.LeftOuter),
+    #"Expanded Double Count" = Table.ExpandTableColumn(Join4, "Double Count", {"Count"}, {"Count"}),
+    #"Added Custom1" = Table.AddColumn(#"Expanded Double Count", "raw_probability", each [NextCount]/[Count]),
+    #"Changed Type3" = Table.TransformColumnTypes(#"Added Custom1",{{"raw_probability", type number}})
+in
+    #"Changed Type3"
